@@ -1,0 +1,10 @@
+[
+	{
+		"ParameterKey": "ProjectName",
+		"ParameterValue": "udagram"
+	},
+	{
+		"ParameterKey": "KeyPairName",
+		"ParameterValue": "{{resolve:secretsmanager:udagramSSHKey:SecretString}}"
+	}
+]
