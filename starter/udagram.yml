@@ -6,11 +6,6 @@ Parameters:
     Description: A project name that will be prefixed to resource names
     Type: String
 
-  KeyPairName:
-    Type: String
-    Default: "{{resolve:secretsmanager:udagramSSHKey:SecretString}}"
-    Description: "The SSH key to the instance."
-
 Resources:
 
   LoadBalancerSecurityGroup:
@@ -40,22 +35,46 @@ Resources:
       GroupDescription: Security group for Bastion servers that enable SSH access
       SecurityGroupIngress:
       - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
         CidrIp: 0.0.0.0/0
+
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: udagramSKey
 
   BastionHostInstance1:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t2.micro
       ImageId: ami-0557a15b87f6559cf
-      KeyName: !Ref KeyPairName
+      KeyName: !Ref EC2KeyPair
       NetworkInterfaces:
         - AssociatePublicIpAddress: 'true'
           DeviceIndex: '0'
           SubnetId: 
             Fn::ImportValue: 
               !Sub "${ProjectName}-PUB1-SN"  
+          GroupSet:
+            - !Ref BastionSecurityGroup
+  
+  BastionHostInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0557a15b87f6559cf
+      KeyName: !Ref EC2KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          SubnetId: 
+            Fn::ImportValue: 
+              !Sub "${ProjectName}-PUB2-SN"  
           GroupSet:
             - !Ref BastionSecurityGroup
 
@@ -87,7 +106,35 @@ Resources:
             #!/bin/bash
             apt-get update -y
             apt-get install nginx -y
-            service nginx start
+
+            cat <<EOT > /usr/share/nginx/html/index.html
+            <!DOCTYPE html>
+            <html>
+            <body>
+                <h1>It works! Udagram, Udacity</h1>
+            </body>
+            </html>
+            EOT
+
+            systemctl restart nginx
+
+            apt-get install -y awslogs
+
+            cat <<EoF >> /etc/awslogs/awslogs.conf
+            [general]
+            state_file = /var/lib/awslogs/agent-state
+
+            [/var/log/nginx/access.log]
+            file = /var/log/nginx/access.log
+            log_group_name = !Sub "${ProjectName}/nginx-access"
+            log_stream_name = {instance_id}
+
+            [/var/log/nginx/error.log]
+            file = /var/log/nginx/error.log
+            log_group_name = !Sub "${ProjectName}/nginx-error"
+            log_stream_name = {instance_id}
+            EoF
+            systemctl start awslogs
         ImageId: ami-0557a15b87f6559cf
         SecurityGroupIds:
           - !Ref WebServerSecurityGroup
@@ -123,15 +170,20 @@ Resources:
               - 's3:GetObject*'
               Resource:
                 - !Sub "arn:aws:s3:::any-bucket-name/*"
-        - PolicyName: SecretsManagerAccess
+        - PolicyName: SSMAccessPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - 'secretsmanager:GetSecretValue'
-                Resource:
-                  - !Sub arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret/udagramSSHKey
+                Action: 
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                  - ec2messages:Get*
+                Resource: "*"
   WebServerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -209,6 +261,13 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-LB-URL
 
-  # BastionIP1:
-  #   Description: IP1 of the Bastion Host
-  #   Value: !GetAtt BastionHostInstance1.PublicIp
+  BastionIP1:
+    Description: IP1 of the Bastion Host
+    Value: !GetAtt BastionHostInstance1.PublicIp
+  BastionIP2:
+    Description: IP2 of the Bastion Host
+    Value: !GetAtt BastionHostInstance2.PublicIp
+
+  WebServerLogs:
+    Description: Log group for Web Server logs
+    Value: !Sub "${ProjectName}/nginx-access"
