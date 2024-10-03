@@ -107,7 +107,7 @@ Resources:
             apt-get update -y
             apt-get install nginx -y
 
-            cat <<EOT > /usr/share/nginx/html/index.html
+            cat <<EOT > /var/www/html/index.html
             <!DOCTYPE html>
             <html>
             <body>
